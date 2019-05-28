@@ -1,0 +1,85 @@
+for(cancer in c("LGG"<"GBM")){
+  message(paste0("Starting",cancer))
+  
+  #Prepare CNV matrix
+  cnvMatrix <- get((paste0(cancer,"cnvhg19.rda")))
+  
+  #Add label (0 for loss, 1 for gain)
+  cnvMatrix <- cbind(cnvMatrix,Label = NA)
+  cnvMatrix[cnvMatrix[,"Segment_Mean"] < -0.3,"Label"] <- 0
+  cnvMatrix[cnvMatrix[,"Segment_Mean"] > 0.3, "Label"] <- 1
+  cnvMatrix <- cnvMatrix[!is.na(cnvMatrix$Label),1]
+  
+  #Remove "Segment_Mean" and change col.names
+  cnvMatrix <- cnvMatrix[,-6]
+  colnames(cnvMatrix) <- c("Sample.Name","Chromosome","Start","End","Num.of.Markers","Aberration")
+  
+  #Substitute Chromosomes "X" and "Y" with "23" and "24"
+  xidx <- which(cnvMatrix$Chromosome == "X")
+  yidx <- which(cnvMatrix$Chromosome == "Y")
+  cnvMatrix[xidx,"Chromosome"] <- 23
+  cnvMatrix[yidx,"Chromosome"] <- 24
+  cnvMatrix$Chromosome <- sapply(cnvMatrix$Chromosome,as.integer)
+  
+  #Recurrent CNV identification with GAIA
+  #Retrieve probes meta file from broadinstitute website
+  gdac.root <- "ftp://ftp.broadinstitute.org/pub/GISTIC2.0/hg19_support/"
+  file <- paste0(gdac.root,"genome.info.6.0_hg19.na31_minus_frequent_nan_probes_sorted_2.1.txt")
+  if(!file.exists(basename(file))) download(file,basename(file))
+  markersMatrix <- readr::read_tsv(basename(file), col_names = F, col_types = "ccn", progress = T)
+  colnames(markersMatrix) <- c("Probe.Name","Chromosome","Start")
+  unique(markersMatrix$Chromosome)
+  xidix <- which(markersMatrix$Chromosome == "X")
+  yidx <- which(markersMatrix$Chromosome == "Y")
+  markersMatrix[xidix,"Chromosome"] <-23
+  markersMatrix[yidix,"Chromosome"] <-24
+  markersMatrix$Chromosome <- sapply(markersMatrix$Chromosome,as.integer)
+  markerID <- apply(markersMatrix,1,function(x)(paste0(x[2],":",x[3])))
+  #Duplicated markers
+  print(table(duplicated(markerID)))
+  
+  #Duplicated markers with different names
+  print(table(duplicated(markersMatrix$Probe.Name)))
+  
+  #Remove duplicates
+  markersMatrix <- markersMatrix[-which(duplicated(markerID)),]
+  
+  #Filter markersMatrix for common CNV 
+  markerID <- apply(markersMatrix,1,function(x)(paste0(x[2],":",x[3])))
+  
+  file <- paste0(gdac.root,"CNV.hg19.bypos.111213.txt")
+  if(!file.exists(basename(file))) download(file,basename(file))
+  commonCNV <- readr::read_tsv(basename(file),progress = T)
+  commonID <- apply(commonCNV,1,function(x)(paste0(x[2],":",x[3])))
+  print(table(commonID %in% markerID))
+  print(table(markerID %in% commonID))
+  markersMatrix_fil <- markersMatrix[!markerID %in% commonID,]
+  
+  markers_obj <- load_markers(as.data.frame(markersMatrix_fil))
+  nbsamples <- length(get(paste0("query",tolower(cancer),".nocnv"))$results[[1]]$cases)
+  cnv_obj <- load_cnv(cnvMatrix,markers_obj,nbsamples)
+  results <- runGAIA(cnv_obj,
+                     markers_obj,
+                     output_file_name = paste0("GAIA",cancer,"_flt.txt"),
+                     aberrations = -1,
+                     chromosomes = -1,
+                     num_iterations = 10,
+                     threshold = 0.25)
+  
+  #Set q-value threshold 
+  threshold <- 0.0001
+  
+  #Plot the results
+  RecCNV <- t(apply(results,1,as.numeric))
+  colnames(RecCNV) <- colnames(results)
+  RecCNV <- cbind(RecCNV,score=0)
+  minval <- format(min(RecCNV[RecCNV[,"q-value"] != 0, "q-value"]), scientific = F)
+  minval <- substring(minval,1,nchar(minval)-1)
+  RecCNV[RecCNV[,"q-value"]==0,"q-value"] <- as.numeric(minval)
+  RecCNV[,"score"] <- sapply(RecCNV[,"q-value"],function(x)(-log10(as.numeric(x))))
+  RecCNV[RecCNV[,"q-value"] == as.numeric(minval),]
+  
+  gaiaCNVplot(RecCNV,cancer,threshold)
+  save(results,RecCNV,threshold,file = paste0(cancer,"_CNV_results.rda"))
+  message(paste0("Results saved as:",cancer,"_CNV_results.rda"))
+}
