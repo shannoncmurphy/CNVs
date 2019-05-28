@@ -1,0 +1,20 @@
+### Pre-processing: searching/downloading 
+query_lgg_cnv <- GDCquery(project = "TCGA-LGG",
+                          data.category = "Copy number variation",
+                          legacy = T,
+                          file.type = "cnv_hg19.seg",
+                          sample.type = c("Primary solid Tumor"))
+GDCdownload(query_lgg_cnv)
+lgg.cnv <- GDCprepare(query_lgg_cnv,
+                      save = T,
+                      save.filename = "LGGcnvhg19.rda")
+
+query_gbm_cnv <- GDCquery(project = "TCGA-GBM",
+                          data.category = "Copy number variation",
+                          legacy = T,
+                          file.type = "cnv_hg19.seg",
+                          sample.type = c("Primary solid Tumor"))
+GDCdownload(query_gbm_cnv)
+gbm.cnv <- GDCprepare(query_gbm_cnv,
+                      save = T,
+                      save.filename = "GMBcnvh19.rda")
